@@ -1,0 +1,35 @@
+実行日時: 2026-11-20T07:56:00+00:00
+実行コマンド: uv run python -m app.agent --trace "<質問>"
+質問: コンパクションとセッションをまたぐメモリはどう違いますか。日々のメモはすべて長期メモリに入りますか？
+対象資料: 第1〜3回の本講義214ページ
+
+[model] gemini-3.5-flash-lite
+講義資料に基づき、コンパクションとセッションをまたぐメモリの違い、および日々のメモの長期メモリへの保存について回答します。
+
+### 1. コンパクションとセッションをまたぐメモリの違い
+
+* **コンパクション（履歴の要約）**
+  * **範囲:** 1つのセッション（コンテキストの中）で機能します（第3回・PDF p.39）。
+  * **仕組み:** コンテキストの制限対策として、古い履歴を要約して詰める（要約に置き換える）仕組みです（第3回・PDF p.39, 65）。
+* **セッションをまたぐメモリ（外の保存先）**
+  * **範囲:** セッションをまたいで機能します（第3回・PDF p.39）。
+  * **仕組み:** ファイルなどの外の保存先に情報を書き出し、新しいチャットやセッションの際に読み戻すことで、過去のやり取りや設定を引き継ぎます（第3回・PDF p.13, 39）。
+
+---
+
+### 2. 日々のメモはすべて長期メモリに入りますか？
+
+* **すべては入りません。**
+  * 例えば OpenClaw の実装例では、日々のメモ（`memory/日付.md`）の中から、毎晩の見直し（dreaming）によって「何度も出てくるテーマ」などの基準を超えたものだけが `MEMORY.md`（長期メモリ）に移されます（第3回・PDF p.40）。
+  * 「一度きりの調べものは日々のメモに残るだけ」であり、すべてを蓄積すると古い情報や誤りも一緒に戻ってしまうため、何を残し何を消すかが設計されます（第3回・PDF p.38, 40）。
+
+--- trace ---
+[tool call]   search_materials({'query': 'コンパクション'})
+[tool call]   search_materials({'query': 'セッションをまたぐメモリ'})
+[tool call]   search_materials({'query': '長期メモリ 日々のメモ'})
+[tool return] search_materials -> {"results": [{"page_id": "lec03-main-p065", "document_id": "lec03-main", "lecture": 3, "document_title": "AIエージェント", "se…
+[tool return] search_materials -> {"results": [{"page_id": "lec03-main-p038", "document_id": "lec03-main", "lecture": 3, "document_title": "AIエージェント", "se…
+[tool return] search_materials -> {"results": [{"page_id": "lec03-main-p040", "document_id": "lec03-main", "lecture": 3, "document_title": "AIエージェント", "se…
+[time] 回答完了まで 11.04 秒（検索・埋め込みを含む）
+[usage] 入力 6,702 tokens / 出力 444 tokens / モデル応答 2 回
+[cost] 生成APIの推定コスト: $0.003121 USD（埋め込み・索引構築分は含まない）

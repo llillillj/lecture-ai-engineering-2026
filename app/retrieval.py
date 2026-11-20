@@ -33,6 +33,7 @@ def get_all_materials() -> str:
         for page in section["content"]
     )
 
+
 def load_pages(source: Path = RAG_SOURCE) -> list[dict]:
     """資料→章→ページのJSONを、対象資料のページ一覧に変換する。"""
     documents = json.loads(source.read_text(encoding="utf-8"))
@@ -52,16 +53,19 @@ def load_pages(source: Path = RAG_SOURCE) -> list[dict]:
 def browse_tree(node_id: str | None = None) -> dict:
     """直下のページは先頭文、指定したページ自身は全文を返す。"""
     tree = json.loads(RAG_TREE.read_text(encoding="utf-8"))
-    tree["children"] = [node for node in tree["children"] if node["id"] in RAG_DOCUMENT_IDS]
+    tree["children"] = [node for node in tree["children"]
+                        if node["id"] in RAG_DOCUMENT_IDS]
     node_id = node_id or tree["id"]
     pages = {page["page_id"]: page for page in load_pages(RAG_SOURCE)}
 
     def describe(node, full=False):
         info = {key: node[key] for key in ("id", "kind", "title")}
         if node["kind"] == "page":
-            info.update({key: value for key, value in pages[node["id"]].items() if key != "page_id"})
+            info.update(
+                {key: value for key, value in pages[node["id"]].items() if key != "page_id"})
             if not full:
-                info["content"] = re.split(r"(?<=[。！？])|\n", info["content"].strip(), maxsplit=1)[0]
+                info["content"] = re.split(
+                    r"(?<=[。！？])|\n", info["content"].strip(), maxsplit=1)[0]
         return info
 
     remaining = [tree]
@@ -95,12 +99,14 @@ def normalized_vector(values: list[float]) -> list[float]:
 def embed_text(text: str, task_type: str) -> list[float]:
     """Geminiで文章を埋め込む。入力上限を超えた場合は切り捨てず停止する。"""
     with genai.Client(api_key=get_api_key()) as client:
-        count = client.models.count_tokens(model=EMBEDDING_MODEL, contents=text).total_tokens
+        count = client.models.count_tokens(
+            model=EMBEDDING_MODEL, contents=text).total_tokens
         if count is None or count > EMBEDDING_MAX_TOKENS:
             raise ValueError(f"埋め込み入力が上限を超えるか計測不能です: {count} tokens。")
         response = client.models.embed_content(
             model=EMBEDDING_MODEL, contents=text,
-            config=types.EmbedContentConfig(task_type=task_type, output_dimensionality=EMBEDDING_DIMENSIONS),
+            config=types.EmbedContentConfig(
+                task_type=task_type, output_dimensionality=EMBEDDING_DIMENSIONS),
         )
     embedding = response.embeddings[0]
     if embedding.statistics and embedding.statistics.truncated:
@@ -138,6 +144,72 @@ def search(query: str) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def search_decomposed(queries: list[str]) -> dict:
+    """複数の検索クエリを個別に検索し、重複を除いた結果も返す。"""
+    if not isinstance(queries, list) or not queries:
+        raise ValueError("検索クエリを1つ以上指定してください。")
+    if any(not isinstance(query, str) or not query.strip() for query in queries):
+        raise ValueError("検索クエリには空でない文字列を指定してください。")
+
+    results_by_query = {}
+    combined = {}
+    for query in queries:
+        query = query.strip()
+        results = search(query)
+        results_by_query[query] = results
+        for result in results:
+            combined.setdefault(result["page_id"], result)
+    return {
+        "queries": list(results_by_query),
+        "results_by_query": results_by_query,
+        "results": list(combined.values()),
+    }
+
+
+def search_with_neighbors(query: str, radius: int = 1, source: Path = RAG_SOURCE) -> list[dict]:
+    """検索ヒットに同資料内の前後ページを加え、重複を除いて返す。"""
+    if radius < 0:
+        raise ValueError("radius は0以上で指定してください。")
+
+    pages = load_pages(source)
+    ordered_by_document: dict[str, list[dict]] = defaultdict(list)
+    for page in pages:
+        ordered_by_document[page["document_id"]].append(page)
+
+    for document_pages in ordered_by_document.values():
+        document_pages.sort(key=lambda page: page["page"])
+
+    positions = {
+        page["page_id"]: (document_id, index)
+        for document_id, document_pages in ordered_by_document.items()
+        for index, page in enumerate(document_pages)
+    }
+    merged: dict[str, dict] = {}
+    for rank, hit in enumerate(search(query)):
+        merged.setdefault(hit["page_id"], {**hit, "context": "search_hit", "rank": rank})
+        position = positions.get(hit["page_id"])
+        if position is None:
+            continue
+        document_id, index = position
+        document_pages = ordered_by_document[document_id]
+        start = max(0, index - radius)
+        end = min(len(document_pages), index + radius + 1)
+        for neighbor_index in range(start, end):
+            neighbor = document_pages[neighbor_index]
+            page_id = neighbor["page_id"]
+            if page_id in merged:
+                continue
+            relation = "neighbor_prev" if neighbor_index < index else "neighbor_next"
+            if neighbor_index == index:
+                relation = "search_hit"
+            merged[page_id] = {
+                **neighbor,
+                "context": relation,
+                "rank": rank,
+            }
+    return list(merged.values())
+
+
 def search_graph(query: str) -> dict:
     """ベクトル検索を入口に、前後ページと共通用語で候補を広げる。"""
     pages = {page["page_id"]: page for page in load_pages(RAG_SOURCE)}
@@ -151,7 +223,8 @@ def search_graph(query: str) -> dict:
             adjacent[a].add(b)
             adjacent[b].add(a)
 
-    seeds = [hit for hit in search(query) if hit["page_id"] in pages][:min(GRAPH_START_K, GRAPH_MAX_RESULTS)]
+    seeds = [hit for hit in search(query) if hit["page_id"] in pages][:min(
+        GRAPH_START_K, GRAPH_MAX_RESULTS)]
     seed_ids = {seed["page_id"] for seed in seeds}
     results, candidates = [], {}
     for rank, seed in enumerate(seeds):
@@ -165,7 +238,8 @@ def search_graph(query: str) -> dict:
             if len(path) - 1 >= GRAPH_HOPS:
                 continue
             # 同じ深さなら、接続先が少ない用語からたどる。
-            neighbors = sorted(adjacent[current], key=lambda n: (len(adjacent[n]), n))
+            neighbors = sorted(adjacent[current],
+                               key=lambda n: (len(adjacent[n]), n))
             for neighbor in neighbors:
                 if neighbor in visited:
                     continue
@@ -174,7 +248,8 @@ def search_graph(query: str) -> dict:
                 queue.append((neighbor, route))
                 if neighbor not in pages or neighbor in seed_ids:
                     continue
-                frequency = max((len(adjacent[n]) for n in route if nodes[n]["kind"] == "term"), default=0)
+                frequency = max(
+                    (len(adjacent[n]) for n in route if nodes[n]["kind"] == "term"), default=0)
                 priority = (len(route) - 1, frequency, rank, neighbor)
                 candidate = {**pages[neighbor], "hops": len(route) - 1,
                              "path": [{"id": n, "title": nodes[n]["title"]} for n in route]}
@@ -185,10 +260,10 @@ def search_graph(query: str) -> dict:
             "max_hops": GRAPH_HOPS}
 
 
-
 def run_full_context(agent, question: str, model, instructions: str, prompt_template: str):
     """全資料を一括投入し、検索ツールを使わずに回答する。"""
-    prompt = prompt_template.format(materials=get_all_materials(), question=question)
+    prompt = prompt_template.format(
+        materials=get_all_materials(), question=question)
     print(f"[full-context] 入力{len(prompt):,}文字")
     try:
         with agent.override(tools=[], instructions=instructions):

@@ -54,3 +54,61 @@ def test_existing_index_survives_failed_rebuild(materials):
         build_index(source, database, rebuild=True, embedder=embed)
     assert database.read_bytes() == before
     assert not list(database.parent.glob(".rag-build-*"))
+
+
+def test_decomposed_search_groups_results_and_removes_duplicates(monkeypatch):
+    hits = {
+        "論点A": [{"page_id": "p1", "content": "A"}],
+        "論点B": [{"page_id": "p1", "content": "A"}, {"page_id": "p2", "content": "B"}],
+    }
+    monkeypatch.setattr(retrieval, "search", lambda query: hits[query])
+
+    result = retrieval.search_decomposed(["論点A", "論点B"])
+
+    assert result["queries"] == ["論点A", "論点B"]
+    assert result["results_by_query"]["論点B"] == hits["論点B"]
+    assert [hit["page_id"] for hit in result["results"]] == ["p1", "p2"]
+
+
+@pytest.mark.parametrize("queries", [[], [""]])
+def test_decomposed_search_rejects_empty_queries(queries):
+    with pytest.raises(ValueError):
+        retrieval.search_decomposed(queries)
+
+
+def test_search_with_neighbors_adds_adjacent_pages_without_duplicates(tmp_path, monkeypatch):
+    source = tmp_path / "lectures.json"
+    source.write_text(json.dumps([
+        {"id": "lec02-main", "title": "第2回", "content": [
+            {"section": "章", "content": [
+                {"id": "lec02-main-p051", "title": "51", "page": 51, "content": "本文51"},
+                {"id": "lec02-main-p052", "title": "52", "page": 52, "content": "本文52"},
+                {"id": "lec02-main-p053", "title": "53", "page": 53, "content": "本文53"},
+            ]}
+        ]}
+    ], ensure_ascii=False), encoding="utf-8")
+    seed = {
+        "page_id": "lec02-main-p052",
+        "document_id": "lec02-main",
+        "lecture": 2,
+        "document_title": "第2回",
+        "section": "章",
+        "title": "52",
+        "page": 52,
+        "content": "本文52",
+        "distance": 0.1,
+    }
+    monkeypatch.setattr(retrieval, "search", lambda query: [seed])
+
+    results = retrieval.search_with_neighbors("LoRA", source=source)
+
+    assert [result["page_id"] for result in results] == [
+        "lec02-main-p052",
+        "lec02-main-p051",
+        "lec02-main-p053",
+    ]
+    assert [result["context"] for result in results] == [
+        "search_hit",
+        "neighbor_prev",
+        "neighbor_next",
+    ]

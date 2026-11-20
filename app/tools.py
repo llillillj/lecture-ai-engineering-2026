@@ -120,6 +120,27 @@ def search_materials(query: str) -> str:
         return json.dumps({"error": api_error_message(e.code), "results": []}, ensure_ascii=False)
 
 
+def search_materials_decomposed(queries: list[str]) -> str:
+    """複数の論点を別々に検索し、クエリごとの結果と重複を除いた結果を返す。
+
+    複数の話題を含む質問では、論点ごとに2〜4個の検索クエリへ分けて指定する。
+    各クエリは独立した質問として、具体的な用語や比較対象を含めること。
+    """
+    from google.genai.errors import APIError
+    import sqlite3
+    from app.retrieval import search_decomposed
+
+    try:
+        return json.dumps(search_decomposed(queries), ensure_ascii=False)
+    except (ValueError, FileNotFoundError, sqlite3.Error) as e:
+        return json.dumps({"error": str(e), "results_by_query": {}, "results": []}, ensure_ascii=False)
+    except APIError as e:
+        return json.dumps(
+            {"error": api_error_message(e.code), "results_by_query": {}, "results": []},
+            ensure_ascii=False,
+        )
+
+
 def browse_tree(node_id: str | None = None) -> str:
     """目次とページの先頭文を返す。ページIDを指定すると全文を返す。
 
