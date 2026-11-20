@@ -46,3 +46,24 @@ def test_material_result_reaches_the_model(monkeypatch):
     returns = _parts(result, ToolReturnPart)
     assert returns and returns[0].tool_name == "search_materials"
     assert json.loads(returns[0].content)["results"] == [hit]
+
+
+def test_decompose_mode_calls_decomposed_tool(monkeypatch):
+    from app.agent import DECOMPOSE_INSTRUCTIONS, tools
+
+    monkeypatch.setattr(
+        "app.retrieval.search",
+        lambda query: [{"page_id": "lec03-main-p039", "lecture": 3, "page": 39, "content": "メモリの違い"}],
+    )
+    model = TestModel(call_tools=["search_materials_decomposed"])
+    with agent.override(
+        model=model,
+        instructions=DECOMPOSE_INSTRUCTIONS,
+        tools=[tools.search_materials, tools.search_materials_decomposed],
+    ):
+        result = agent.run_sync(
+            "コンパクションとセッションをまたぐメモリの違い、日々のメモの扱いは？"
+        )
+
+    calls = [p for m in result.all_messages() for p in m.parts if isinstance(p, ToolCallPart)]
+    assert any(call.tool_name == "search_materials_decomposed" for call in calls)

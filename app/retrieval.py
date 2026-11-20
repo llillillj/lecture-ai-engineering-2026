@@ -144,6 +144,28 @@ def search(query: str) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def search_decomposed(queries: list[str]) -> dict:
+    """複数の検索クエリを個別に検索し、重複を除いた結果も返す。"""
+    if not isinstance(queries, list) or not queries:
+        raise ValueError("検索クエリを1つ以上指定してください。")
+    if any(not isinstance(query, str) or not query.strip() for query in queries):
+        raise ValueError("検索クエリには空でない文字列を指定してください。")
+
+    results_by_query = {}
+    combined = {}
+    for query in queries:
+        query = query.strip()
+        results = search(query)
+        results_by_query[query] = results
+        for result in results:
+            combined.setdefault(result["page_id"], result)
+    return {
+        "queries": list(results_by_query),
+        "results_by_query": results_by_query,
+        "results": list(combined.values()),
+    }
+
+
 def search_with_neighbors(query: str, radius: int = 1, source: Path = RAG_SOURCE) -> list[dict]:
     """検索ヒットに同資料内の前後ページを加え、重複を除いて返す。"""
     if radius < 0:

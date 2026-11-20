@@ -56,6 +56,26 @@ def test_existing_index_survives_failed_rebuild(materials):
     assert not list(database.parent.glob(".rag-build-*"))
 
 
+def test_decomposed_search_groups_results_and_removes_duplicates(monkeypatch):
+    hits = {
+        "論点A": [{"page_id": "p1", "content": "A"}],
+        "論点B": [{"page_id": "p1", "content": "A"}, {"page_id": "p2", "content": "B"}],
+    }
+    monkeypatch.setattr(retrieval, "search", lambda query: hits[query])
+
+    result = retrieval.search_decomposed(["論点A", "論点B"])
+
+    assert result["queries"] == ["論点A", "論点B"]
+    assert result["results_by_query"]["論点B"] == hits["論点B"]
+    assert [hit["page_id"] for hit in result["results"]] == ["p1", "p2"]
+
+
+@pytest.mark.parametrize("queries", [[], [""]])
+def test_decomposed_search_rejects_empty_queries(queries):
+    with pytest.raises(ValueError):
+        retrieval.search_decomposed(queries)
+
+
 def test_search_with_neighbors_adds_adjacent_pages_without_duplicates(tmp_path, monkeypatch):
     source = tmp_path / "lectures.json"
     source.write_text(json.dumps([
